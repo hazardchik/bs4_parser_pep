@@ -10,7 +10,7 @@ from tqdm import tqdm
 from configs import configure_argument_parser, configure_logging
 from constants import BASE_DIR, MAIN_DOC_URL, PEP_URL, EXPECTED_STATUS
 from outputs import control_output
-from utils import get_response, get_request, find_tag
+from utils import get_response, find_tag
 
 
 def _output_mismatches_log(non_matching_statuses):
@@ -30,13 +30,11 @@ def _output_mismatches_log(non_matching_statuses):
 
 def _forms_result_pep(count_status):
     """Формирует данные по парсинку PEP для вывода."""
-    results = [('Статус', 'Количество')]
-    total = 0
-    for status, count in count_status.items():
-        results.append((status, count))
-        total += count
-    results.append(('Total', total))
-    return results
+    return [
+        ('Статус', 'Количество'),
+        *count_status.items(),
+        ('Всего', sum(count_status.values())),
+    ]
 
 
 def pep(session):
@@ -80,20 +78,23 @@ def pep(session):
             if status in status_table:
                 count_status[status] += 1
                 continue
-            non_matching_statuses.append(
-                {'status_detail': status,
+            non_matching_statuses.append({
+                    'status_detail': status,
                     'status_table': status_table,
-                    'url_detail': url_pep_detail}
-                )
+                    'url_detail': url_pep_detail,
+                })
+
     _output_mismatches_log(non_matching_statuses)
     return _forms_result_pep(count_status)
 
 
 def whats_new(session):
     whats_new_url = urljoin(MAIN_DOC_URL, 'whatsnew/')
-    session = requests_cache.CachedSession()
     results = [('Ссылка на статью', 'Заголовок', 'Редактор, Автор'), ]
-    soup = get_request(session, whats_new_url)
+    response = get_response(session, whats_new_url)
+    if response is None:
+        return
+    soup = BeautifulSoup(response.text, features='lxml')
 
     main_div = find_tag(
         soup, 'section', attrs={'id': 'what-s-new-in-python'}
@@ -107,7 +108,7 @@ def whats_new(session):
                                               attrs={'class': 'toctree-l1'})
 
     for section in tqdm(sections_by_python):
-        version_a_tag = section.find('a')
+        version_a_tag = find_tag(section, 'a')
         href = version_a_tag['href']
         version_link = urljoin(whats_new_url, href)
         response = get_response(session, version_link)
@@ -126,9 +127,12 @@ def whats_new(session):
 def latest_versions(session):
     session = requests_cache.CachedSession()
     results = [('Ссылка на документацию', 'Версия', 'Статус')]
-    soup = get_request(session, MAIN_DOC_URL)
+    response = get_response(session, MAIN_DOC_URL)
+    if response is None:
+        return
+    soup = BeautifulSoup(response.text, features='lxml')
 
-    sidebar = soup.find('div', {'class': 'sphinxsidebarwrapper'})
+    sidebar = find_tag(soup, 'div', {'class': 'sphinxsidebarwrapper'})
     ul_tags = sidebar.find_all('ul')
     for ul in ul_tags:
         if 'All versions' in ul.text:
@@ -153,13 +157,16 @@ def latest_versions(session):
 
 def download(session):
     downloads_url = urljoin(MAIN_DOC_URL, 'download.html')
-    session = requests_cache.CachedSession()
-    soup = get_request(session, downloads_url)
+    response = get_response(session, downloads_url)
+    if response is None:
+        return
+    soup = BeautifulSoup(response.text, features='lxml')
 
-    main_tag = soup.find('div', {'role': 'main'})
-    table_tag = main_tag.find('table', {'class': 'docutils'})
+    main_tag = find_tag(soup, 'div', {'role': 'main'})
+    table_tag = find_tag(main_tag, 'table', {'class': 'docutils'})
 
-    pdf_a4_tag = table_tag.find('a', {'href': re.compile(r'.+pdf-a4\.zip$')})
+    pdf_a4_tag = find_tag(table_tag,
+                          'a', {'href': re.compile(r'.+pdf-a4\.zip$')})
     pdf_a4_link = pdf_a4_tag['href']
     archive_url = urljoin(downloads_url, pdf_a4_link)
     filename = archive_url.split('/')[-1]
@@ -167,6 +174,8 @@ def download(session):
     downloads_dir.mkdir(exist_ok=True)
     archive_path = downloads_dir / filename
     response = session.get(archive_url)
+    if response is None:
+        return
     with open(archive_path, 'wb') as file:
         file.write(response.content)
     logging.info(f'Архив был загружен и сохранён: {archive_path}')
