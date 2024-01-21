@@ -1,6 +1,7 @@
 import logging
 import re
 import requests_cache
+from collections import defaultdict
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
@@ -49,11 +50,7 @@ def pep(session):
     tbody_pep_table = find_tag(section_pep_table, 'tbody')
     tr_tags_pep_table = tbody_pep_table.find_all('tr')
     non_matching_statuses = []
-    count_status = {'Active': 0, 'Accepted': 0,
-                    'Deferred': 0, 'Final': 0,
-                    'Provisional': 0, 'Rejected': 0,
-                    'Superseded': 0, 'Withdrawn': 0,
-                    'Draft': 0, 'Active': 0, }
+    count_status = defaultdict(int)
     for tr_tag_pep_table in tqdm(tr_tags_pep_table):
         a_tag_pep_table = find_tag(tr_tag_pep_table, 'a', attrs={'class':
                                    'pep reference internal'})
@@ -75,9 +72,8 @@ def pep(session):
                 'dd', {'class': 'field-even'}
                 )
             status = dd_tag_pep_detail.text
-            if status in status_table:
-                count_status[status] += 1
-                continue
+            if status in EXPECTED_STATUS[status_code]:
+                count_status[status] = count_status[status]+1
             non_matching_statuses.append({
                     'status_detail': status,
                     'status_table': status_table,
